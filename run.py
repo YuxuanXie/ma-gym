@@ -7,8 +7,8 @@ import tensorflow as tf
 
 
 class QMix():
-    def __init__(self, env, num_s, num_a, lr=0.0001, gamma=0.99, replace_target_iter=2000,
-                 memory_size=2000000, batch_size=256*50, epsilon=1, epsilon_decay=0.0001):
+    def __init__(self, env, num_s, num_a, lr=0.0001, gamma=0.99, replace_target_iter=100,
+                 memory_size=200000, batch_size=256*10, epsilon=1, epsilon_decay=0.0001):
         self.env = env
         self.name = "qmix"
         self.num_global_s = num_s
@@ -96,18 +96,18 @@ class QMix():
 
                 # with tf.variable_scope('eval_net'):
                 with tf.variable_scope('hyper_layer1'):
-                    non_abs_w1 = tf.layers.dense(inputs=self.S, units=2*32, kernel_initializer=w_initializer,
+                    non_abs_w1 = tf.layers.dense(inputs=self.S, units=2*32, activation=tf.nn.relu, kernel_initializer=w_initializer,
                                                  bias_initializer=b_initializer, name='non_abs_w1')
                     self.w1 = tf.reshape(tf.abs(non_abs_w1), shape=[-1, 2, 32], name='w1')
                     self.b1 = tf.layers.dense(inputs=self.S, units=32, kernel_initializer=w_initializer,
                                               bias_initializer=b_initializer, name='non_abs_b1')
                 with tf.variable_scope('hyper_layer2'):
-                    non_abs_w2 = tf.layers.dense(inputs=self.S, units=32 * 1, kernel_initializer=w_initializer,
+                    non_abs_w2 = tf.layers.dense(inputs=self.S, units=32 * 1, activation=tf.nn.relu, kernel_initializer=w_initializer,
                                                  bias_initializer=b_initializer, name='non_abs_w2')
                     self.w2 = tf.reshape(tf.abs(non_abs_w2), shape=[-1, 32, 1], name='w2')
                     bef_b2 = tf.layers.dense(inputs=self.S, units=32, activation=tf.nn.relu,
                                              kernel_initializer=w_initializer, bias_initializer=b_initializer, name='bef_b2')
-                    self.b2 = tf.layers.dense(inputs=bef_b2, units=1, kernel_initializer=w_initializer,
+                    self.b2 = tf.layers.dense(inputs=bef_b2, units=1, activation=tf.nn.relu, kernel_initializer=w_initializer,
                                               bias_initializer=b_initializer, name='non_abs_b2')
 
                 with tf.variable_scope('layer_mix_eval'):
