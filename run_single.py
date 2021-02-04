@@ -140,7 +140,8 @@ class QMix():
             # with tf.variable_scope('q_target'):
                 
             with tf.variable_scope('loss'):
-                self.loss = tf.reduce_mean(tf.squared_difference(self.q_target, self.Q_tot, name='TD_error'))
+                # self.loss = tf.reduce_mean(tf.squared_difference(self.q_target, self.Q_tot, name='TD_error'))
+                self.loss = tf.reduce_mean(tf.squared_difference(self.q_target, self.q_selected, name='TD_error'))
             with tf.variable_scope('train'):
                 self._train_op = tf.train.RMSPropOptimizer(self.lr).minimize(self.loss)
 
@@ -198,19 +199,13 @@ class QMix():
         q_ = self.sess.run(self.q_next, feed_dict={self.s_: s_})
         q_m_ = np.max(q_, axis=1)
         q_tot_ = self.sess.run(self.Q_tot_, feed_dict={self.S_: S_, self.q_m_: q_m_})
-
-        q_target = np.array(R) + (1 - np.array(done)) * self.gamma * np.squeeze(q_tot_, axis=-1)
-
-        tvars = tf.trainable_variables()
-        tvars_vals_b = self.sess.run(tvars)
+        R = np.repeat(np.expand_dims(np.array(R), axis=-1), 2, axis=1).reshape(2048)
+        done = np.repeat(np.expand_dims(np.array(done), axis=-1), 2, axis=1).reshape(2048)
+        q_target = R + (1 - np.array(done)) * self.gamma * q_m_ # np.squeeze(q_tot_, axis=-1)
         # update
         _, cost = self.sess.run([self._train_op, self.loss],
                                 feed_dict={self.S: S, self.s:s, self.a: actions_1hot,
                                            self.q_target: q_target, self.done: done})
-        tvars_vals_a = self.sess.run(tvars)
-
-        import pdb; pdb.set_trace()
-
         # print('cost', cost)
 
         self.write_summary_scalar('loss', cost, self.learn_step_cnt)
@@ -254,46 +249,3 @@ env = gym.make('CartPole-v0')
 alg = QMix(env, env.observation_space.shape[0], env.action_space.n)
 
 alg.train()
-
-
-def Qmix_mixer(agent_qs, state, state_dim, n_agents, n_h_mixer):
-    """
-    Args:
-        agent_qs: shape [batch, n_agents]
-        state: shape [batch, state_dim]
-        state_dim: integer
-        n_agents: integer
-        n_h_mixer: integer
-    """
-    agent_qs_reshaped = tf.reshape(agent_qs, [-1, 1, n_agents])
-
-    # n_h_mixer * n_agents because result will be reshaped into matrix
-    hyper_w_1 = get_variable('hyper_w_1', [state_dim, n_h_mixer*n_agents]) 
-    hyper_w_final = get_variable('hyper_w_final', [state_dim, n_h_mixer])
-
-    hyper_b_1 = tf.get_variable('hyper_b_1', [state_dim, n_h_mixer])
-
-    hyper_b_final_l1 = tf.layers.dense(inputs=state, units=n_h_mixer, activation=tf.nn.relu,
-                                       use_bias=False, name='hyper_b_final_l1')
-    hyper_b_final = tf.layers.dense(inputs=hyper_b_final_l1, units=1, activation=None,
-                                    use_bias=False, name='hyper_b_final')
-
-    # First layer
-    w1 = tf.abs(tf.matmul(state, hyper_w_1))
-    b1 = tf.matmul(state, hyper_b_1)
-    w1_reshaped = tf.reshape(w1, [-1, n_agents, n_h_mixer]) # reshape into batch of matrices
-    b1_reshaped = tf.reshape(b1, [-1, 1, n_h_mixer])
-    # [batch, 1, n_h_mixer]
-    hidden = tf.nn.elu(tf.matmul(agent_qs_reshaped, w1_reshaped) + b1_reshaped)
-    
-    # Second layer
-    w_final = tf.abs(tf.matmul(state, hyper_w_final))
-    w_final_reshaped = tf.reshape(w_final, [-1, n_h_mixer, 1]) # reshape into batch of matrices
-    b_final_reshaped = tf.reshape(hyper_b_final, [-1, 1, 1])
-
-    # [batch, 1, 1]
-    y = tf.matmul(hidden, w_final_reshaped) + b_final_reshaped
-
-    q_tot = tf.reshape(y, [-1, 1])
-
-    return q_tot
