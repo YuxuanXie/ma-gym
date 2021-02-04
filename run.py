@@ -222,6 +222,13 @@ class QMix():
 
         q_target = np.array(R) + (1 - np.array(done)) * self.gamma * np.squeeze(q_tot_, axis=-1)
 
+        # import pdb; pdb.set_trace()
+        tvars = tf.trainable_variables()
+        tvars_vals_b = self.sess.run(tvars)
+        # f = open("before.txt", "a")
+        # for var, val in zip(tvars, tvars_vals):
+        #     f.write(var,)
+        # f.close()
         # update
         _, cost = self.sess.run([self._train_op, self.loss],
                                 feed_dict={self.S: S, self.s:s, self.a: actions_1hot,
@@ -229,6 +236,14 @@ class QMix():
 
         # print('cost', cost)
 
+        tvars_vals_a = self.sess.run(tvars)
+        # f = open("after.txt", "a")
+        # for var, val in zip(tvars, tvars_vals):
+        #     f.write(tvars_vals)
+        # f.close()
+
+        import pdb; pdb.set_trace()
+        
         self.write_summary_scalar('loss', cost, self.learn_step_cnt)
         self.write_summary_scalar('epsilon', self.epsilon, self.learn_step_cnt)
         self.write_summary_scalar('memory_cnt', self.memory_counter, self.learn_step_cnt)
