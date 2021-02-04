@@ -104,7 +104,7 @@ class QMix():
             self.done = tf.placeholder(tf.float32, [None, ], name='done')  # input Done info ???
 
             self.q_m_ = tf.placeholder(tf.float32, [None, ], name='q_value_next_max')
-            self.q_target = tf.placeholder(tf.float32, [None], name='q_tot_target')
+            self.q_target = tf.placeholder(tf.float32, [None,], name='q_tot_target')
 
             w_initializer, b_initializer = tf.random_normal_initializer(0., 0.1), tf.constant_initializer(0.0)
 
@@ -171,7 +171,7 @@ class QMix():
             if len(s.shape) < 2:
                 s = np.array(state)[np.newaxis, :]
             q_eval = self.sess.run(self.q_eval, feed_dict={self.s: s})
-            action = np.argmax(q_eval, axis=-1)[0]
+            action = np.argmax(q_eval, axis=-1).tolist()
         else:  # pick random action
             action = self.env.action_space.sample() 
         return action
@@ -243,19 +243,17 @@ class QMix():
     def train(self):
         
         for i in range(50000):        
-            # done_n = [False for _ in range(env.n_agents)]
-            done_n = False
+            done_n = [False for _ in range(env.n_agents)]
             ep_reward = 0
             obs = env.reset()
-            while not done_n:
+            while not all(done_n):
                 # env.render()
                 action = self.act(obs)
                 obs_n, reward_n, done_n, info = env.step(action)
-                # import pdb; pdb.set_trace()
-                ep_reward += reward_n
-                obs_glob = [obs.tolist() + obs.tolist()]
-                obs_glob_next = [obs_n.tolist() + obs_n.tolist()]
-                self.store(obs_glob + [obs.tolist()] + [obs.tolist()] + [action, action] + [reward_n] + obs_glob_next + [obs_n.tolist()] + [obs_n.tolist()] + [done_n])
+                ep_reward += sum(reward_n)
+                obs_glob = [obs[0] + obs[1]]
+                obs_glob_next = [obs_n[0] + obs_n[1]]
+                self.store(obs_glob + obs + action + [sum(reward_n)] + obs_glob_next + obs_n + [all(done_n)])
                 obs = obs_n
                 self.learn()
             self.write_summary_scalar("ep_reward", ep_reward, self.learn_step_cnt)
@@ -264,9 +262,9 @@ class QMix():
         self.summary_writer.add_summary(tf.Summary(value=[tf.Summary.Value(tag=tag, simple_value=value)]), iteration)
 
 
-env = gym.make('CartPole-v0')
-# alg = QMix(env, env.observation_space[0].shape[0], env.action_space[0].n)
-alg = QMix(env, env.observation_space.shape[0], env.action_space.n)
+env = gym.make('Switch2-v0')
+alg = QMix(env, env.observation_space[0].shape[0], env.action_space[0].n)
+# alg = QMix(env, env.observation_space.shape[0], env.action_space.n)
 
 alg.train()
 
