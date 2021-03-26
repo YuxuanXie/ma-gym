@@ -53,7 +53,9 @@ class QMix():
             self.s_ = tf.placeholder(tf.float32, [None, self.num_s], name='s1_')  # input next state for agent1
             self.R = tf.placeholder(tf.float32, [None, ], name='R')  # input Reward
             self.a = tf.placeholder(tf.float32, [None, self.num_a], name='a')  # input Action onehot for agent1
+            self.a_ = tf.placeholder(tf.float32, [None, self.num_a], name='a')  # input Action onehot for agent1
             self.done = tf.placeholder(tf.float32, [None, ], name='done')  # input Done info ???
+            
 
             self.q_m =  tf.placeholder(tf.float32, [None, ], name='q_value_max')
             self.q_m_ = tf.placeholder(tf.float32, [None, ], name='q_value_next_max')
@@ -98,7 +100,7 @@ class QMix():
 
                 with tf.variable_scope('target_hyper'):
                     ans_chosen_ = Qplex_mixer(self.q_concat_, self.S_, self.n_agents, self.num_global_s, is_v=True)
-                    ans_adv_ = Qplex_mixer(self.q_concat_, self.S_, self.n_agents, self.num_global_s, max_q_i=self.q_m_, actions=self.a, is_v=False)
+                    ans_adv_ = Qplex_mixer(self.q_concat_, self.S_, self.n_agents, self.num_global_s, max_q_i=self.q_m_, actions=self.a_, is_v=False)
                     self.Q_tot_ = ans_chosen_ + ans_adv_
 
             # todo: add q_target, loss, train_op
@@ -151,19 +153,15 @@ class QMix():
             s_.append([exp[7], exp[8]])
             done.append(exp[9])
         # to get q_tot
-        # S = np.stack(S)
-        # S_ = np.stack(S_)
+
 
         s = np.stack(s)
         a = np.stack(a)
         s_ = np.stack(s_)
         # avas = np.stack(avas)
-
         s.shape = (self.batch_size*self.n_agents, self.num_s)
         s_.shape = (self.batch_size*self.n_agents, self.num_s)
 
-        # S.shape = (self.batch_size*self.n_agents, self.num_global_s)
-        # S_.shape = (self.batch_size*self.n_agents, self.num_global_s)
         # avas.shape = (self.batch_size*self.n_agents, self.num_a)
 
         actions_1hot = np.zeros([self.batch_size, self.n_agents, self.num_a], dtype=int)
@@ -179,7 +177,16 @@ class QMix():
         q_ = self.sess.run(self.q_next, feed_dict={self.s_: s_})
         # q_[avas[:, :] == 0] = - 999999  # mask unavailable actions
         q_m_ = np.max(q_, axis=1)
-        q_tot_ = self.sess.run(self.Q_tot_, feed_dict={self.S_: S_, self.q_m_: q_m_, self.a: actions_1hot})
+        max_q_i = np.argmax(q_, axis=1)
+        max_q_i.shape = (self.batch_size, self.n_agents)
+
+        actions_1hot_ = np.zeros([self.batch_size, self.n_agents, self.num_a], dtype=int)
+        grid_ = np.indices((self.batch_size, self.n_agents))
+        actions_1hot_[grid_[0], grid_[1], max_q_i] = 1
+        actions_1hot_.shape = (self.batch_size*self.n_agents, self.num_a)
+
+
+        q_tot_ = self.sess.run(self.Q_tot_, feed_dict={self.S_: S_, self.q_m_: q_m_, self.a_: actions_1hot_})
 
         # update
         _, cost = self.sess.run([self._train_op, self.loss],

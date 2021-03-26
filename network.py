@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 w_initializer, b_initializer = tf.random_normal_initializer(0., 0.1), tf.constant_initializer(0.0)
-num_kernel = 10
+num_kernel = 1
 
 def get_variable(name, shape):
 
@@ -53,16 +53,18 @@ def Qmix_mixer(agent_qs, state, state_dim, n_agents, n_h_mixer):
 def si_weight(states, actions, n_agents):
 
     data = tf.concat([states, actions], axis=-1)
-    with tf.variable_scope('adv_hyer'):
-        all_head_key = tf.layers.dense(states, 1, kernel_initializer=w_initializer,
-                                        bias_initializer=b_initializer, name='all_head_key')
-        all_head_agents = tf.layers.dense(states, n_agents, kernel_initializer=w_initializer,
-                                    bias_initializer=b_initializer, name='all_head_agents')
-        all_head_action = tf.layers.dense(data, n_agents, kernel_initializer=w_initializer,
-                                    bias_initializer=b_initializer, name='all_head_action')
+
+    for i in range(num_kernel):
+        with tf.variable_scope('adv_hyer'):
+            all_head_key = tf.layers.dense(states, 1, kernel_initializer=w_initializer,
+                                            bias_initializer=b_initializer, name='all_head_key-{}'.format(i))
+            all_head_agents = tf.layers.dense(states, n_agents, kernel_initializer=w_initializer,
+                                        bias_initializer=b_initializer, name='all_head_agents-{}'.format(i))
+            all_head_action = tf.layers.dense(data, n_agents, kernel_initializer=w_initializer,
+                                        bias_initializer=b_initializer, name='all_head_action-{}'.format(i))
 
     head_attend_weights = []
-
+    
     x_key = tf.repeat(tf.abs(all_head_key), n_agents) + 1e-10
     x_key = tf.reshape(x_key, shape=[-1, n_agents])
     x_agents = tf.sigmoid(all_head_agents)
@@ -84,15 +86,12 @@ def calc_adv(agent_qs, states, actions, max_q_i, n_agents):
     # actions = actions.reshape(-1, action_dim)
     # agent_qs = agent_qs.view(-1, n_agents)
     # max_q_i = max_q_i.view(-1, n_agents)
-    # import pdb; pdb.set_trace()
 
     adv_q = agent_qs - max_q_i
-    # adv_w_final = si_weight(states, actions, n_agents)
-    # adv_w_final = tf.reshape(adv_w_final, shape=[-1, n_agents])
+    adv_w_final = si_weight(states, actions, n_agents)
+    adv_w_final = tf.reshape(adv_w_final, shape=[-1, n_agents])
 
-    # adv_tot = adv_q * (adv_w_final - 1.)
-
-    adv_tot = tf.reduce_mean(adv_q, axis=-1)
+    adv_tot = tf.reduce_mean(adv_q * (adv_w_final - 1.), axis=-1)
     return adv_tot
 
 
