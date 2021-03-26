@@ -13,7 +13,7 @@ class QMix():
         self.env = env
         self.name = "qmix"
         self.num_global_s = num_s
-        self.num_s = num_s / 2
+        self.num_s = int(num_s / 2)
         self.num_a = num_a
         self.lr = lr
         self.gamma = gamma
@@ -27,6 +27,7 @@ class QMix():
         self.episode_cnt = 0
         self.memory = []
         self.memory_counter = 0
+        self.n_agents = 2
         self._build_net()
 
         t_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name + '/target_net')
@@ -91,13 +92,13 @@ class QMix():
                 self.q_concat_ =tf.reshape(self.q_m_, [-1, self.n_agents]) 
 
                 with tf.variable_scope('eval_hyper'):
-                    ans_chosen = Qplex_mixer(chosen_action_qvals, batch["state"][:, :-1], is_v=True)
-                    ans_adv = Qplex_mixer(self.q_concat, self.S, self.num_global_s, self.n_agents, 32, max_q_i=q_m, actions=self.a, is_v=False)
+                    ans_chosen = Qplex_mixer(self.q_concat, self.S, self.n_agents, self.num_global_s, is_v=True)
+                    ans_adv = Qplex_mixer(self.q_concat, self.S, self.n_agents, self.num_global_s, max_q_i=self.q_m, actions=self.a, is_v=False)
                     self.Q_tot = ans_chosen + ans_adv
 
                 with tf.variable_scope('target_hyper'):
-                    ans_chosen_ = Qplex_mixer(chosen_action_qvals, batch["state"][:, :-1], is_v=True)
-                    ans_adv_ = Qplex_mixer(self.q_concat_, self.S_, self.num_global_s, self.n_agents, 32, max_q_i=q_m_, actions=self.a, is_v=False)
+                    ans_chosen_ = Qplex_mixer(self.q_concat_, self.S_, self.n_agents, self.num_global_s, is_v=True)
+                    ans_adv_ = Qplex_mixer(self.q_concat_, self.S_, self.n_agents, self.num_global_s, max_q_i=self.q_m_, actions=self.a, is_v=False)
                     self.Q_tot_ = ans_chosen_ + ans_adv_
 
             # todo: add q_target, loss, train_op
@@ -138,8 +139,10 @@ class QMix():
         if self.learn_step_cnt % 10000 == 0:
             print(self.name, 'update ----> learn_step_cnt', self.learn_step_cnt)
         batch_exp = random.sample(self.memory, self.batch_size)
-        S, s1, s2, a1, a2, R, S_, s1_, s2_, done = [[] for _ in range(10)]
+        S, s, a, R, S_, s_, done = [[] for _ in range(7)]
         for exp in batch_exp:
+            # S.append([exp[0], exp[0]])
+            # S_.append([exp[6], exp[6]])
             S.append(exp[0])
             s.append([exp[1], exp[2]])
             a.append([exp[3], exp[4]])
@@ -148,6 +151,9 @@ class QMix():
             s_.append([exp[7], exp[8]])
             done.append(exp[9])
         # to get q_tot
+        # S = np.stack(S)
+        # S_ = np.stack(S_)
+
         s = np.stack(s)
         a = np.stack(a)
         s_ = np.stack(s_)
@@ -155,6 +161,9 @@ class QMix():
 
         s.shape = (self.batch_size*self.n_agents, self.num_s)
         s_.shape = (self.batch_size*self.n_agents, self.num_s)
+
+        # S.shape = (self.batch_size*self.n_agents, self.num_global_s)
+        # S_.shape = (self.batch_size*self.n_agents, self.num_global_s)
         # avas.shape = (self.batch_size*self.n_agents, self.num_a)
 
         actions_1hot = np.zeros([self.batch_size, self.n_agents, self.num_a], dtype=int)
@@ -170,8 +179,7 @@ class QMix():
         q_ = self.sess.run(self.q_next, feed_dict={self.s_: s_})
         # q_[avas[:, :] == 0] = - 999999  # mask unavailable actions
         q_m_ = np.max(q_, axis=1)
-
-        q_tot_ = self.sess.run(self.Q_tot_, feed_dict={self.S: S_, self.q_m_: q_m_})
+        q_tot_ = self.sess.run(self.Q_tot_, feed_dict={self.S_: S_, self.q_m_: q_m_, self.a: actions_1hot})
 
         # update
         _, cost = self.sess.run([self._train_op, self.loss],
