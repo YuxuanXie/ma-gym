@@ -4,6 +4,7 @@ import random
 import datetime
 import numpy as np
 import tensorflow as tf
+from network import Qplex_mixer
 
 
 class QMix():
@@ -50,14 +51,11 @@ class QMix():
             self.S_ = tf.placeholder(tf.float32, [None, self.num_global_s], name='S_')  # input Next Global State
             self.s_ = tf.placeholder(tf.float32, [None, self.num_s], name='s1_')  # input next state for agent1
             self.R = tf.placeholder(tf.float32, [None, ], name='R')  # input Reward
-            self.a1 = tf.placeholder(tf.int32, [None, ], name='a1')  # input Action for agent1
-            self.a2 = tf.placeholder(tf.int32, [None, ], name='a2')  # input Action for agent2
+            self.a = tf.placeholder(tf.float32, [None, self.num_a], name='a')  # input Action onehot for agent1
             self.done = tf.placeholder(tf.float32, [None, ], name='done')  # input Done info ???
 
-            self.q1_a1 = tf.placeholder(tf.float32, [None, ], name='q1_eval_value_wrt_a1')
-            self.q2_a2 = tf.placeholder(tf.float32, [None, ], name='q2_eval_value_wrt_a2')
-            self.q1_m_ = tf.placeholder(tf.float32, [None, ], name='q1_value_next_max')
-            self.q2_m_ = tf.placeholder(tf.float32, [None, ], name='q2_value_next_max')
+            self.q_m =  tf.placeholder(tf.float32, [None, ], name='q_value_max')
+            self.q_m_ = tf.placeholder(tf.float32, [None, ], name='q_value_next_max')
 
             w_initializer, b_initializer = tf.random_normal_initializer(0., 0.1), tf.constant_initializer(0.0)
 
@@ -65,60 +63,42 @@ class QMix():
             with tf.variable_scope('eval_net'):
                 a_fc1 = tf.layers.dense(self.s, 128, tf.nn.relu, kernel_initializer=w_initializer,
                                         bias_initializer=b_initializer, name='agent_fc1_e')
-                # a_fc2 = tf.layers.dense(a_fc1, 128, tf.nn.relu, kernel_initializer=w_initializer,
-                #                         bias_initializer=b_initializer, name='agent_fc2_e')
-                # a_fc3 = tf.layers.dense(a_fc2, 64, tf.nn.relu, kernel_initializer=w_initializer,
-                #                         bias_initializer=b_initializer, name='agent_fc3_e')
-                self.q_eval = tf.layers.dense(a_fc1, self.num_a, kernel_initializer=w_initializer,
+                a_fc2 = tf.layers.dense(a_fc1, 128, tf.nn.relu, kernel_initializer=w_initializer,
+                                        bias_initializer=b_initializer, name='agent_fc2_e')
+                a_fc3 = tf.layers.dense(a_fc2, 64, tf.nn.relu, kernel_initializer=w_initializer,
+                                        bias_initializer=b_initializer, name='agent_fc3_e')
+                self.q_eval = tf.layers.dense(a_fc3, self.num_a, kernel_initializer=w_initializer,
                                               bias_initializer=b_initializer, name='q_e')
 
             # ------------------ build target_net ------------------
             with tf.variable_scope('target_net'):
                 a_fc1_ = tf.layers.dense(self.s_, 128, tf.nn.relu, kernel_initializer=w_initializer,
                                          bias_initializer=b_initializer, name='agent_fc1_t')
-                # a_fc2_ = tf.layers.dense(a_fc1_, 128, tf.nn.relu, kernel_initializer=w_initializer,
-                #                          bias_initializer=b_initializer, name='agent_fc2_t')
-                # a_fc3_ = tf.layers.dense(a_fc2_, 64, tf.nn.relu, kernel_initializer=w_initializer,
-                #                          bias_initializer=b_initializer, name='agent_fc3_t')
-                self.q_next = tf.layers.dense(a_fc1_, self.num_a, kernel_initializer=w_initializer,
+                a_fc2_ = tf.layers.dense(a_fc1_, 128, tf.nn.relu, kernel_initializer=w_initializer,
+                                         bias_initializer=b_initializer, name='agent_fc2_t')
+                a_fc3_ = tf.layers.dense(a_fc2_, 64, tf.nn.relu, kernel_initializer=w_initializer,
+                                         bias_initializer=b_initializer, name='agent_fc3_t')
+                self.q_next = tf.layers.dense(a_fc3_, self.num_a, kernel_initializer=w_initializer,
                                               bias_initializer=b_initializer, name='q_t')
+
+            # [batch*n_agents, 1]
+            self.q_selected = tf.reduce_sum(tf.multiply(self.q_eval, self.a), axis=1)
 
             # ------------------ build mixing_net ------------------
             with tf.variable_scope('mixing_net'):
-                # a1_indices = tf.stack([tf.range(tf.shape(self.a1)[0], dtype=tf.int32), self.a1], axis=1, name='a1_indices')
-                # a2_indices = tf.stack([tf.range(tf.shape(self.a2)[0], dtype=tf.int32), self.a2], axis=1, name='a2_indices')
-                # a3_indices = tf.stack([tf.range(tf.shape(self.a3)[0], dtype=tf.int32), self.a3], axis=1, name='a3_indices')
-                # q1_a = tf.gather_nd(params=self.q1_eval, indices=a1_indices, name='q1_eval_wrt_a')
-                # q2_a = tf.gather_nd(params=self.q2_eval, indices=a2_indices, name='q2_eval_wrt_a')
-                # q3_a = tf.gather_nd(params=self.q3_eval, indices=a3_indices, name='q3_eval_wrt_a')
-                self.q_concat = tf.stack([self.q1_a1, self.q2_a2], axis=1, name='q_concat')
-                self.q_concat_ = tf.stack([self.q1_m_, self.q2_m_], axis=1, name='q_concat_next')  # todo
+                # [batch, n_agents]
+                self.q_concat = tf.reshape(self.q_selected, [-1, self.n_agents])
+                self.q_concat_ =tf.reshape(self.q_m_, [-1, self.n_agents]) 
 
-                # with tf.variable_scope('eval_net'):
-                with tf.variable_scope('hyper_layer1'):
-                    non_abs_w1 = tf.layers.dense(inputs=self.S, units=2*32, activation=tf.nn.relu, kernel_initializer=w_initializer,
-                                                 bias_initializer=b_initializer, name='non_abs_w1')
-                    self.w1 = tf.reshape(tf.abs(non_abs_w1), shape=[-1, 2, 32], name='w1')
-                    self.b1 = tf.layers.dense(inputs=self.S, units=32, kernel_initializer=w_initializer,
-                                              bias_initializer=b_initializer, name='non_abs_b1')
-                with tf.variable_scope('hyper_layer2'):
-                    non_abs_w2 = tf.layers.dense(inputs=self.S, units=32 * 1, activation=tf.nn.relu, kernel_initializer=w_initializer,
-                                                 bias_initializer=b_initializer, name='non_abs_w2')
-                    self.w2 = tf.reshape(tf.abs(non_abs_w2), shape=[-1, 32, 1], name='w2')
-                    bef_b2 = tf.layers.dense(inputs=self.S, units=32, activation=tf.nn.relu,
-                                             kernel_initializer=w_initializer, bias_initializer=b_initializer, name='bef_b2')
-                    self.b2 = tf.layers.dense(inputs=bef_b2, units=1, activation=tf.nn.relu, kernel_initializer=w_initializer,
-                                              bias_initializer=b_initializer, name='non_abs_b2')
+                with tf.variable_scope('eval_hyper'):
+                    ans_chosen = Qplex_mixer(chosen_action_qvals, batch["state"][:, :-1], is_v=True)
+                    ans_adv = Qplex_mixer(self.q_concat, self.S, self.num_global_s, self.n_agents, 32, max_q_i=q_m, actions=self.a, is_v=False)
+                    self.Q_tot = ans_chosen + ans_adv
 
-                with tf.variable_scope('layer_mix_eval'):
-                    lin1 = tf.matmul(tf.reshape(self.q_concat, shape=[-1, 1, 2]), self.w1) + tf.reshape(self.b1, shape=[-1, 1, 32])
-                    a1 = tf.nn.elu(lin1, name='a1')
-                    self.Q_tot = tf.reshape(tf.matmul(a1, self.w2), shape=[-1, 1]) + self.b2
-
-                with tf.variable_scope('layer_mix_target'):
-                    lin1_ = tf.matmul(tf.reshape(self.q_concat_, shape=[-1, 1, 2]), self.w1) + tf.reshape(self.b1, shape=[-1, 1, 32])
-                    a1_ = tf.nn.elu(lin1_, name='a1_')
-                    self.Q_tot_ = tf.reshape(tf.matmul(a1_, self.w2), shape=[-1, 1]) + self.b2
+                with tf.variable_scope('target_hyper'):
+                    ans_chosen_ = Qplex_mixer(chosen_action_qvals, batch["state"][:, :-1], is_v=True)
+                    ans_adv_ = Qplex_mixer(self.q_concat_, self.S_, self.num_global_s, self.n_agents, 32, max_q_i=q_m_, actions=self.a, is_v=False)
+                    self.Q_tot_ = ans_chosen_ + ans_adv_
 
             # todo: add q_target, loss, train_op
             with tf.variable_scope('q_target'):
@@ -161,50 +141,45 @@ class QMix():
         S, s1, s2, a1, a2, R, S_, s1_, s2_, done = [[] for _ in range(10)]
         for exp in batch_exp:
             S.append(exp[0])
-            s1.append(exp[1])
-            s2.append(exp[2])
-            a1.append(exp[3])
-            a2.append(exp[4])
+            s.append([exp[1], exp[2]])
+            a.append([exp[3], exp[4]])
             R.append(exp[5])
             S_.append(exp[6])
-            s1_.append(exp[7])
-            s2_.append(exp[8])
+            s_.append([exp[7], exp[8]])
             done.append(exp[9])
         # to get q_tot
-        q1_eval = self.sess.run(self.q_eval, feed_dict={self.s: s1})
-        q2_eval = self.sess.run(self.q_eval, feed_dict={self.s: s2})
-        row_index = [_ for _ in range(self.batch_size)]
-        q1_a1 = q1_eval[row_index, a1]
-        q2_a2 = q2_eval[row_index, a2]
+        s = np.stack(s)
+        a = np.stack(a)
+        s_ = np.stack(s_)
+        # avas = np.stack(avas)
+
+        s.shape = (self.batch_size*self.n_agents, self.num_s)
+        s_.shape = (self.batch_size*self.n_agents, self.num_s)
+        # avas.shape = (self.batch_size*self.n_agents, self.num_a)
+
+        actions_1hot = np.zeros([self.batch_size, self.n_agents, self.num_a], dtype=int)
+        grid = np.indices((self.batch_size, self.n_agents))
+        actions_1hot[grid[0], grid[1], a] = 1
+        actions_1hot.shape = (self.batch_size*self.n_agents, self.num_a)
+
+
+        q = self.sess.run(self.q_eval, feed_dict={self.s: s})
+        q_m = np.max(q, axis=1)
 
         # to get q_tot_
-        q1_ = self.sess.run(self.q_next, feed_dict={self.s_: s1_})
-        q2_ = self.sess.run(self.q_next, feed_dict={self.s_: s2_})
-        q1_m_ = np.max(q1_, axis=1)
-        q2_m_ = np.max(q2_, axis=1)
-        q_tot_ = self.sess.run(self.Q_tot_,
-                               feed_dict={self.S: S_, self.q1_m_: q1_m_, self.q2_m_: q2_m_})
+        q_ = self.sess.run(self.q_next, feed_dict={self.s_: s_})
+        # q_[avas[:, :] == 0] = - 999999  # mask unavailable actions
+        q_m_ = np.max(q_, axis=1)
 
-        # import pdb; pdb.set_trace()
-        tvars = tf.trainable_variables()
-        tvars_vals_b = self.sess.run(tvars)
-        # f = open("before.txt", "a")
-        # for var, val in zip(tvars, tvars_vals):
-        #     f.write(var,)
-        # f.close()
+        q_tot_ = self.sess.run(self.Q_tot_, feed_dict={self.S: S_, self.q_m_: q_m_})
+
         # update
-        _, cost = self.sess.run([self._train_op, self.loss], feed_dict={self.S: S, self.q1_a1: q1_a1, self.q2_a2: q2_a2,
-                                           self.a1: a1, self.a2: a2, self.R: R, self.Q_tot_: q_tot_, self.done: done})
+        _, cost = self.sess.run([self._train_op, self.loss],
+                                feed_dict={self.S: S, self.s:s, self.a: actions_1hot,
+                                           self.R: R, self.Q_tot_: q_tot_, self.done: done, self.q_m: q_m})
         # print('cost', cost)
 
-        tvars_vals_a = self.sess.run(tvars)
-        # f = open("after.txt", "a")
-        # for var, val in zip(tvars, tvars_vals):
-        #     f.write(tvars_vals)
-        # f.close()
 
-        import pdb; pdb.set_trace()
-        
         self.write_summary_scalar('loss', cost, self.learn_step_cnt)
         self.write_summary_scalar('epsilon', self.epsilon, self.learn_step_cnt)
         self.write_summary_scalar('memory_cnt', self.memory_counter, self.learn_step_cnt)
