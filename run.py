@@ -32,6 +32,8 @@ class QMix():
 
         t_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name + '/target_net')
         e_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name + '/eval_net')
+        t_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name + '/mixing_net/eval_hyper')
+        e_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name + '/mixing_net/target_hyper')
 
         with tf.variable_scope('soft_replacement'):
             self.target_replace_op = [tf.assign(t, e) for t, e in zip(t_params, e_params)]

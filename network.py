@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 w_initializer, b_initializer = tf.random_normal_initializer(0., 0.1), tf.constant_initializer(0.0)
-num_kernel = 1
+num_kernel = 10
 
 def get_variable(name, shape):
 
@@ -53,25 +53,29 @@ def Qmix_mixer(agent_qs, state, state_dim, n_agents, n_h_mixer):
 def si_weight(states, actions, n_agents):
 
     data = tf.concat([states, actions], axis=-1)
+    all_head_key, all_head_agents, all_head_action = [ [] for _ in range(3)]
 
-    for i in range(num_kernel):
-        with tf.variable_scope('adv_hyer'):
-            all_head_key = tf.layers.dense(states, 1, kernel_initializer=w_initializer,
-                                            bias_initializer=b_initializer, name='all_head_key-{}'.format(i))
-            all_head_agents = tf.layers.dense(states, n_agents, kernel_initializer=w_initializer,
-                                        bias_initializer=b_initializer, name='all_head_agents-{}'.format(i))
-            all_head_action = tf.layers.dense(data, n_agents, kernel_initializer=w_initializer,
-                                        bias_initializer=b_initializer, name='all_head_action-{}'.format(i))
+    with tf.variable_scope('adv_hyer'):
+        for i in range(num_kernel):
+            all_head_key.append(tf.layers.dense(states, 1, kernel_initializer=w_initializer,
+                                            bias_initializer=b_initializer, name='all_head_key-{}'.format(i)))
+            all_head_agents.append(tf.layers.dense(states, n_agents, kernel_initializer=w_initializer,
+                                        bias_initializer=b_initializer, name='all_head_agents-{}'.format(i)))
+            all_head_action.append(tf.layers.dense(data, n_agents, kernel_initializer=w_initializer,
+                                        bias_initializer=b_initializer, name='all_head_action-{}'.format(i)))
 
     head_attend_weights = []
-    
-    x_key = tf.repeat(tf.abs(all_head_key), n_agents) + 1e-10
-    x_key = tf.reshape(x_key, shape=[-1, n_agents])
-    x_agents = tf.sigmoid(all_head_agents)
-    x_action = tf.sigmoid(all_head_action)
-    weights = x_key * x_agents * x_action
 
-    head_attend = tf.reshape(weights, shape=(-1, num_kernel, n_agents))
+    for curr_head_key, curr_head_agents, curr_head_action in zip(all_head_key, all_head_agents, all_head_action):
+        x_key = tf.repeat(tf.abs(curr_head_key), n_agents) + 1e-10
+        x_key = tf.reshape(x_key, shape=[-1, n_agents])
+        x_agents = tf.sigmoid(curr_head_agents)
+        x_action = tf.sigmoid(curr_head_action)
+        weights = x_key * x_agents * x_action
+        head_attend_weights.append(weights)
+
+    head_attend = tf.concat(head_attend_weights, axis=1)
+    head_attend = tf.reshape(head_attend, shape=(-1, num_kernel, n_agents))
     head_attend = tf.reduce_sum(head_attend, axis=1, keepdims=False)
 
     return head_attend
@@ -146,7 +150,6 @@ def Qplex_mixer(agent_qs, state, n_agents, state_dim, n_h_mixer=32,  max_q_i=Non
         max_q_i = w_final * max_q_i + v 
     
     y = calc(agent_qs, state, n_agents, state_dim, actions=actions, max_q_i=max_q_i, is_v=is_v)
-    v_tot = y # tf.expand_dims(y, -1)
-    # v_tot = tf.reshape(v_tot, shape=[-1, -1, 1])
+    v_tot = y 
 
     return v_tot
